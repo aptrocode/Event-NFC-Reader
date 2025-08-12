@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Register Peserta</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 24px auto; }
+    .row { margin: 12px 0; }
+    video, canvas { width: 320px; height: 240px; background:#000; }
+    .uid { font-size: 18px; color: #0a7; }
+    button { padding: 8px 14px; }
+  </style>
+</head>
+<body>
+  <h2>Registrasi Peserta</h2>
+  <p>Status NFC UID: <span class="uid" id="uid">Belum tap</span></p>
+
+  <div class="row">
+    <label>Nama: <input id="name" type="text" placeholder="Nama peserta" /></label>
+  </div>
+
+  <div class="row">
+    <video id="video" autoplay playsinline></video> <br />
+    <button id="capture">Ambil Foto</button>
+    <canvas id="canvas" width="320" height="240" style="display:block; margin-top:8px;"></canvas>
+  </div>
+
+  <div class="row">
+    <button id="submit">Simpan Registrasi</button>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentUID = "";
+    let dataURL = "";
+
+    socket.on("nfc_tapped", (msg) => {
+      currentUID = msg.uid;
+      document.getElementById("uid").textContent = currentUID;
+    });
+
+    // akses kamera
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then(s => { video.srcObject = s; })
+      .catch(err => alert("Gagal akses kamera: " + err));
+
+    document.getElementById("capture").onclick = () => {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      dataURL = canvas.toDataURL("image/jpeg", 0.9);
+      alert("Foto diambil!");
+    };
+
+    document.getElementById("submit").onclick = async () => {
+      const name = document.getElementById("name").value.trim();
+      if (!currentUID) return alert("Silakan tap gelang terlebih dahulu.");
+      if (!name) return alert("Nama wajib diisi.");
+      if (!dataURL) return alert("Ambil foto terlebih dahulu.");
+
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ uid: currentUID, name, photo: dataURL })
+      });
+      const json = await res.json();
+      if (!json.ok) return alert("Gagal: " + (json.error || "unknown"));
+
+      alert("Registrasi berhasil! Gelang bisa dicabut.");
+
+      // reset form
+      document.getElementById("name").value = "";
+      document.getElementById("uid").textContent = "Belum tap";
+      currentUID = ""; dataURL = "";
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+    };
+  </script>
+</body>
+</html>
