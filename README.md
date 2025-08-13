@@ -7,9 +7,7 @@ Mendukung pendaftaran peserta dengan foto, penyimpanan data lokal (CSV + foto), 
 
 ---
 
-## Get Started 🚀
-
-### Hardware
+## Hardware ⚙️
 
 - NFC reader (**ACS ACR122U** recommended)
 - Webcam (untuk ambil foto saat registrasi)
@@ -23,15 +21,9 @@ Mendukung pendaftaran peserta dengan foto, penyimpanan data lokal (CSV + foto), 
 
 - [ACS QuicView for Utility](https://www.acs.com.hk/en/utility-tools/)
 
-Clone Repository
-
-```bash
-git clone https://github.com/aptrocode/Event-NFC-Reader.git
-```
-
 ---
 
-## Installation ⚙️
+## Get Started 🚀
 
 1. **Clone Repository**
 
