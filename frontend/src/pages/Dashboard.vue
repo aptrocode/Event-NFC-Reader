@@ -1,0 +1,288 @@
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount } from 'vue';
+import TheSidebar from '../components/TheSidebar.vue';
+
+const q = ref('');
+const rows = ref<any[]>([]);
+
+const dlg = ref<HTMLDialogElement | null>(null);
+const editUID = ref('');
+const editName = ref('');
+const fileInp = ref<HTMLInputElement | null>(null);
+
+const currentPhotoUrl = ref<string | null>(null);
+const preview = ref<string | null>(null);
+
+const sidebarOpen = ref(false);
+const isDesktop = ref(false);
+const hasInteracted = ref(false);
+
+function setupBreakpoint() {
+  const mql = window.matchMedia('(min-width: 1024px)');
+  const apply = () => {
+    isDesktop.value = mql.matches;
+    if (!hasInteracted.value) {
+      sidebarOpen.value = mql.matches ? true : false;
+    }
+  };
+  mql.addEventListener('change', apply);
+  apply();
+  return () => mql.removeEventListener('change', apply);
+}
+
+function toggleSidebar() {
+  hasInteracted.value = true;
+  sidebarOpen.value = !sidebarOpen.value;
+}
+
+function tsDisplay(path?: string) {
+  if (!path) return '-';
+  const base = path.split('/').pop() || '';
+  const ts = Number(base.split('.')[0].split('_').pop());
+  if (!Number.isFinite(ts)) return '-';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function loadList() {
+  const res = await fetch('/api/participants' + (q.value ? '?q=' + encodeURIComponent(q.value) : ''));
+  const j = await res.json();
+  if (j.ok) rows.value = j.data;
+}
+
+function openEdit(r: any) {
+  editUID.value = r.UID;
+  editName.value = r.Nama || '';
+  currentPhotoUrl.value = r.Foto ? '/' + r.Foto : null;
+  preview.value = null;
+  if (fileInp.value) fileInp.value.value = '';
+  dlg.value?.showModal();
+}
+
+function clearPreview() {
+  preview.value = null;
+  if (fileInp.value) fileInp.value.value = '';
+}
+
+function readFileAsDataURL(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+
+onMounted(() => {
+  const dispose = setupBreakpoint();
+  const inp = fileInp.value;
+  if (inp) {
+    const handler = async () => {
+      const f = inp.files?.[0];
+      if (!f) {
+        preview.value = null;
+        return;
+      }
+      preview.value = await readFileAsDataURL(f);
+    };
+    inp.addEventListener('change', handler);
+  }
+  loadList();
+  onBeforeUnmount(dispose);
+});
+
+async function saveEdit() {
+  const payload: any = { name: editName.value };
+  const f = fileInp.value?.files?.[0];
+  if (f) payload.photoDataURL = await readFileAsDataURL(f);
+  const res = await fetch(`/api/participant/${encodeURIComponent(editUID.value)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const j = await res.json();
+  if (!j.ok) {
+    alert('Gagal menyimpan: ' + (j.error || 'unknown'));
+    return;
+  }
+  dlg.value?.close();
+  await loadList();
+}
+
+async function doDelete(uid: string) {
+  const ok = confirm('Hapus peserta ini? Foto terkait juga akan dihapus.');
+  if (!ok) return;
+  const res = await fetch(`/api/participant/${encodeURIComponent(uid)}?deletePhoto=1`, { method: 'DELETE' });
+  const j = await res.json();
+  if (!j.ok) {
+    alert('Gagal menghapus: ' + (j.error || 'unknown'));
+    return;
+  }
+  await loadList();
+}
+
+function cancelEdit() {
+  dlg.value?.close();
+}
+</script>
+
+<template>
+  <div class="flex">
+    <TheSidebar
+      :class="[
+        'fixed inset-y-0 left-0 w-60 z-50 transition-transform duration-300 will-change-transform',
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        isDesktop ? 'shadow-none' : 'shadow-2xl',
+      ]"
+    />
+    <div :class="['min-h-screen flex-1 transition-[margin] duration-300', isDesktop && sidebarOpen ? 'ml-60' : 'ml-0']">
+      <header class="sticky top-0 z-40 bg-zinc-900/70 backdrop-blur border-b border-zinc-800">
+        <div class="px-3 sm:px-4 py-2.5 flex items-center gap-2">
+          <button aria-label="Toggle sidebar" @click="toggleSidebar" class="cursor-pointer inline-flex items-center justify-center size-9 rounded-lg border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800/70">
+            <svg viewBox="0 0 24 24" class="size-5 stroke-current" fill="none" stroke-width="1.8">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="px-3 sm:px-4 lg:px-6 py-5 space-y-4">
+        <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5">
+          <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            <h2 class="sr-only">Data Peserta</h2>
+            <div class="sm:ml-auto flex items-center gap-2">
+              <input v-model="q" placeholder="Cari nama/UID..." class="px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 outline-none focus:ring-2 focus:ring-sky-500" />
+              <button @click="loadList" class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Search</button>
+              <button
+                @click="
+                  q = '';
+                  loadList();
+                "
+                class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tabel untuk md+ -->
+        <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5 hidden md:block">
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead class="text-left text-zinc-300 border-b border-zinc-800">
+                <tr>
+                  <th class="py-2 pr-4">Foto</th>
+                  <th class="py-2 pr-4">Nama</th>
+                  <th class="py-2 pr-4">UID</th>
+                  <th class="py-2 pr-4">Waktu</th>
+                  <th class="py-2 pr-4">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in rows" :key="r.UID" class="align-middle">
+                  <td class="py-3 pr-4">
+                    <img v-if="r.Foto" :src="'/' + r.Foto" class="size-12 rounded-xl object-cover" />
+                    <div v-else class="size-12 rounded-xl bg-zinc-800 grid place-items-center text-xs text-zinc-400">N/A</div>
+                  </td>
+                  <td class="py-3 pr-4 font-medium max-w-[280px] truncate">{{ r.Nama || '(Tanpa Nama)' }}</td>
+                  <td class="py-3 pr-4 text-zinc-300 whitespace-nowrap">{{ r.UID }}</td>
+                  <td class="py-3 pr-4 text-zinc-300 whitespace-nowrap">{{ tsDisplay(r.Foto) }}</td>
+                  <td class="py-3 pr-4">
+                    <div class="flex gap-2">
+                      <button @click="openEdit(r)" class="cursor-pointer px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Edit</button>
+                      <button @click="doDelete(r.UID)" class="cursor-pointer px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white">Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Kartu list untuk < md -->
+        <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5 md:hidden">
+          <ul class="space-y-3">
+            <li v-for="r in rows" :key="r.UID" class="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <img v-if="r.Foto" :src="'/' + r.Foto" class="size-12 rounded-lg object-cover border border-zinc-800" />
+              <div v-else class="size-12 rounded-lg bg-zinc-800 grid place-items-center text-[10px] text-zinc-400">N/A</div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium truncate">{{ r.Nama || '(Tanpa Nama)' }}</div>
+                <div class="text-xs text-zinc-400 truncate">{{ r.UID }}</div>
+                <div class="text-xs text-zinc-500">{{ tsDisplay(r.Foto) }}</div>
+              </div>
+              <div class="flex gap-2 shrink-0">
+                <button @click="openEdit(r)" class="px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-xs">Edit</button>
+                <button @click="doDelete(r.UID)" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs">Del</button>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </main>
+    </div>
+
+    <dialog ref="dlg" class="modal fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(640px,95vw)] rounded-2xl bg-zinc-900 text-zinc-100 border border-zinc-700 shadow-2xl p-0">
+      <div class="divide-y divide-zinc-800 rounded-2xl overflow-hidden">
+        <header class="px-4 sm:px-5 py-3 flex items-center">
+          <h3 class="font-semibold">Edit Peserta</h3>
+          <button @click="cancelEdit" class="ml-auto inline-flex items-center justify-center size-8 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white">✕</button>
+        </header>
+
+        <div class="p-4 sm:p-5 space-y-5">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="sm:col-span-2">
+              <label class="text-sm">Nama</label>
+              <input v-model="editName" class="mt-1 w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div>
+              <label class="text-sm">UID</label>
+              <input :value="editUID" disabled class="mt-1 w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 opacity-70" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm mb-2">Foto saat ini</div>
+              <img v-if="currentPhotoUrl" :src="currentPhotoUrl" class="w-full max-w-[220px] aspect-square object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
+              <div v-else class="w-[220px] h-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Tidak ada</div>
+            </div>
+            <div>
+              <div class="text-sm mb-2">Preview foto baru</div>
+              <img v-if="preview" :src="preview" class="w-full max-w-[220px] aspect-square object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
+              <div v-else class="w-[220px] h-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Belum dipilih</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+            <div class="sm:col-span-2">
+              <label class="text-sm">Ganti Foto (opsional)</label>
+              <input
+                ref="fileInp"
+                type="file"
+                accept="image/*"
+                class="mt-1 w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-white hover:file:bg-zinc-600"
+              />
+              <p class="text-xs text-zinc-400 mt-1">Jika tidak dipilih, foto lama tetap dipakai.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button @click.prevent="clearPreview" class="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs hover:bg-zinc-700">Bersihkan</button>
+            </div>
+          </div>
+        </div>
+
+        <footer class="px-4 sm:px-5 py-3 flex justify-end gap-2">
+          <button @click="cancelEdit" class="px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Batal</button>
+          <button @click="saveEdit" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">Simpan</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <div v-if="sidebarOpen && !isDesktop" @click="sidebarOpen = false" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
+  </div>
+</template>
+
+<style>
+.modal::backdrop {
+  background: rgba(24, 24, 27, 0.6);
+  backdrop-filter: blur(2px);
+}
+</style>

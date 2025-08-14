@@ -2,19 +2,20 @@
 
 ![Static Badge](https://img.shields.io/badge/license-MIT-brightgreen?label=LICENSE)
 
-Sistem registrasi dan check-in event menggunakan gelang/tag NFC.  
-Mendukung pendaftaran peserta dengan foto, penyimpanan data lokal (CSV + foto), dan pemindaian di booth untuk menampilkan nama dan foto peserta.
+Event registration and check-in system using `NFC` wristbands/tags.
+
+Supports participant registration with photos, local data storage (CSV + photos), and scanning at the booth to display participant names and photos.
 
 ---
 
 ## Hardware ⚙️
 
 - NFC reader (**ACS ACR122U** recommended)
-- Webcam (untuk ambil foto saat registrasi)
+- Webcam (to take photos during registration)
 
 **Required** to install:
 
-- [Python 3.12+](https://www.python.org/downloads/) (Tkinter sudah terbundel di Windows)
+- [Python 3.12+](https://www.python.org/downloads/)
 - [ACS ACR122U NFC Reader Driver](https://www.acs.com.hk/en/products/3/acr122u-usb-nfc-reader/)
 
 **Optional** to install:
@@ -31,13 +32,13 @@ Mendukung pendaftaran peserta dengan foto, penyimpanan data lokal (CSV + foto), 
 git clone https://github.com/aptrocode/Event-NFC-Reader.git
 ```
 
-2. **Masuk ke folder proyek**
+2. **Go to the project folder**
 
 ```bash
 cd Event-NFC-Reader
 ```
 
-3. **Buat dan aktifkan Virtual Environment**
+3. **Create and activate a Virtual Environment**
 
 ```bash
 python -m venv .venv
@@ -53,37 +54,39 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+5. **Go to frontend folder**
+
+```bash
+cd frontend
+```
+
+6. **Install dependencies**
+
+```bash
+bun install
+```
+
+> [!NOTE]
+> if not using `bun` just delete `bun.lockb`, and switch to another package manager like:
+
+```bash
+# npm install
+# yarn install
+# pnpm install
+```
+
 ---
 
 ## Usage 💻
 
-**Jalankan Web UI**
+**Run development**
 
 ```bash
-python app.py
+bun dev
 ```
 
-- Buka http://localhost:5000/register → Halaman registrasi peserta
-
-- Buka http://localhost:5000/booth → Halaman booth scanner
-
-**Registrasi Offline + Tulis Tag Kosong**
-
-```bash
-python BoothWriteEmpty.py
-```
-
-**Update Status Booth di Tag**
-
-```bash
-python BootFill.py
-```
-
-**Tampilkan Nama & Foto dari Scan NFC (Desktop UI)**
-
-```bash
-python ShowNameandPhoto.py
-```
+> [!NOTE]
+> Make sure you run the command in the /frontend directory:
 
 ---
 
