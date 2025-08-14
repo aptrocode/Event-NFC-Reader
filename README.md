@@ -90,7 +90,7 @@ bun dev
 ```
 
 > [!NOTE]
-> Make sure you run the command in the /frontend directory:
+> Make sure you run the command in the `/frontend` directory
 
 ---
 
