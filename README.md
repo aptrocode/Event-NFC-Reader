@@ -8,7 +8,9 @@ Supports participant registration with photos, local data storage (CSV + photos)
 
 ---
 
-## Hardware ⚙️
+## Requirements 📝
+
+**Hardware**
 
 - NFC reader (**ACS ACR122U** recommended)
 - Webcam (to take photos during registration)
@@ -16,10 +18,12 @@ Supports participant registration with photos, local data storage (CSV + photos)
 **Required** to install:
 
 - [Python 3.12+](https://www.python.org/downloads/)
+- [Node 22.18.0+](https://nodejs.org/en/download/)
 - [ACS ACR122U NFC Reader Driver](https://www.acs.com.hk/en/products/3/acr122u-usb-nfc-reader/)
 
 **Optional** to install:
 
+- [Bun](https://bun.com/)
 - [ACS QuicView for Utility](https://www.acs.com.hk/en/utility-tools/)
 
 ---
