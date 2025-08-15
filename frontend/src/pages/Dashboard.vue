@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { io, Socket } from 'socket.io-client';
 import TheSidebar from '../components/TheSidebar.vue';
 import ButtonTable from '../components/atoms/ButtonTable.vue';
 
@@ -7,7 +8,6 @@ type Participant = { UID: string; Nama?: string; Foto?: string };
 
 const q = ref('');
 const rows = ref<Participant[]>([]);
-
 const cols = [
   { key: 'photo', label: 'Foto' },
   { key: 'nama', label: 'Nama' },
@@ -32,6 +32,39 @@ const isDesktop = ref(false);
 const hasInteracted = ref(false);
 let disposeBreakpoint: (() => void) | null = null;
 
+// --- Realtime ---
+let socket: Socket | null = null;
+const liveConnected = ref(false);
+let pollTimer: number | null = null;
+let refreshTimer: number | null = null;
+
+function scheduleRefresh(ms = 350) {
+  if (refreshTimer) window.clearTimeout(refreshTimer);
+  refreshTimer = window.setTimeout(() => void loadList(), ms);
+}
+
+function initSocket() {
+  socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] });
+  socket.on('connect', () => {
+    liveConnected.value = true;
+  });
+  socket.on('disconnect', () => {
+    liveConnected.value = false;
+  });
+
+  const events = ['participant_added', 'participant_updated', 'participant_deleted', 'participants_changed', 'nfc_tapped'];
+  events.forEach((ev) => socket!.on(ev, () => scheduleRefresh()));
+}
+
+function startPollFallback() {
+  // Fallback ringan kalau socket gagal/di-block proxy
+  if (pollTimer) window.clearInterval(pollTimer);
+  pollTimer = window.setInterval(() => {
+    if (!liveConnected.value) void loadList();
+  }, 5000);
+}
+
+// --- Layout ---
 function setupBreakpoint() {
   const mql = window.matchMedia('(min-width: 1024px)');
   const apply = () => {
@@ -42,12 +75,12 @@ function setupBreakpoint() {
   apply();
   return () => mql.removeEventListener('change', apply);
 }
-
 function toggleSidebar() {
   hasInteracted.value = true;
   sidebarOpen.value = !sidebarOpen.value;
 }
 
+// --- Helpers ---
 function tsDisplay(path?: string) {
   if (!path) return '-';
   const base = path.split('/').pop() || '';
@@ -55,9 +88,8 @@ function tsDisplay(path?: string) {
   if (!Number.isFinite(ts)) return '-';
   return new Date(ts * 1000).toLocaleString();
 }
-
 async function loadList() {
-  const res = await fetch('/api/participants' + (q.value ? '?q=' + encodeURIComponent(q.value) : ''));
+  const res = await fetch('/api/participants' + (q.value ? `?q=${encodeURIComponent(q.value)}` : ''));
   const j = await res.json();
   if (j.ok) rows.value = j.data;
 }
@@ -70,12 +102,22 @@ function openEdit(r: Participant) {
   if (fileInp.value) fileInp.value.value = '';
   dlg.value?.showModal();
 }
-
 function clearPreview() {
   preview.value = null;
   if (fileInp.value) fileInp.value.value = '';
 }
-
+function onFileChange(e: Event) {
+  const f = (e.target as HTMLInputElement)?.files?.[0];
+  if (!f) {
+    preview.value = null;
+    return;
+  }
+  const fr = new FileReader();
+  fr.onload = () => {
+    preview.value = fr.result as string;
+  };
+  fr.readAsDataURL(f);
+}
 function readFileAsDataURL(file: File) {
   return new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
@@ -86,7 +128,7 @@ function readFileAsDataURL(file: File) {
 }
 
 async function saveEdit() {
-  const payload: any = { name: editName.value };
+  const payload: Record<string, unknown> = { name: editName.value };
   const f = fileInp.value?.files?.[0];
   if (f) payload.photoDataURL = await readFileAsDataURL(f);
 
@@ -103,13 +145,15 @@ async function saveEdit() {
   dlg.value?.close();
   await loadList();
 }
+function cancelEdit() {
+  dlg.value?.close();
+}
 
 function openDelete(r: Participant) {
   delUid.value = r.UID;
   delName.value = r.Nama || '(Tanpa Nama)';
   delDlg.value?.showModal();
 }
-
 async function confirmDelete() {
   if (!delUid.value) return;
   const res = await fetch(`/api/participant/${encodeURIComponent(delUid.value)}?deletePhoto=1`, { method: 'DELETE' });
@@ -123,36 +167,31 @@ async function confirmDelete() {
   delName.value = null;
   await loadList();
 }
-
 function cancelDelete() {
   delDlg.value?.close();
   delUid.value = null;
   delName.value = null;
 }
 
-function cancelEdit() {
-  dlg.value?.close();
-}
-
+// --- Lifecycle ---
 onMounted(() => {
   disposeBreakpoint = setupBreakpoint();
-  const inp = fileInp.value;
-  if (inp) {
-    const handler = async () => {
-      const f = inp.files?.[0];
-      if (!f) {
-        preview.value = null;
-        return;
-      }
-      preview.value = await readFileAsDataURL(f);
-    };
-    inp.addEventListener('change', handler);
-  }
+  initSocket();
+  startPollFallback();
   loadList();
-});
 
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleRefresh(0);
+  });
+});
 onBeforeUnmount(() => {
   disposeBreakpoint?.();
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+  }
+  if (pollTimer) window.clearInterval(pollTimer);
+  if (refreshTimer) window.clearTimeout(refreshTimer);
 });
 </script>
 
@@ -177,30 +216,33 @@ onBeforeUnmount(() => {
               <path d="M4 7h16M4 12h16M4 17h16" />
             </svg>
           </button>
+
+          <!-- Live indicator -->
+          <div class="ml-2 flex items-center gap-2 text-xs">
+            <span class="inline-flex items-center gap-1 rounded-full px-2 py-1 border" :class="liveConnected ? 'border-sky-700 text-sky-200 bg-sky-900/30' : 'border-zinc-700 text-zinc-300'">
+              <span :class="['size-2 rounded-full', liveConnected ? 'bg-sky-400' : 'bg-zinc-500']"></span>
+              {{ liveConnected ? 'Live' : 'Offline' }}
+            </span>
+          </div>
+
+          <div class="ml-auto flex items-center gap-2">
+            <input v-model="q" placeholder="Cari nama/UID..." class="px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 outline-none focus:ring-2 focus:ring-sky-500" />
+            <button @click="loadList" class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Search</button>
+            <button
+              @click="
+                q = '';
+                loadList();
+              "
+              class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700"
+            >
+              Reset
+            </button>
+          </div>
         </div>
       </header>
 
       <main class="px-3 sm:px-4 lg:px-6 py-5 space-y-4">
-        <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5">
-          <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <h2 class="sr-only">Data Peserta</h2>
-            <div class="sm:ml-auto flex items-center gap-2">
-              <input v-model="q" placeholder="Cari nama/UID..." class="px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 outline-none focus:ring-2 focus:ring-sky-500" />
-              <button @click="loadList" class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Search</button>
-              <button
-                @click="
-                  q = '';
-                  loadList();
-                "
-                class="cursor-pointer px-3 py-2 text-sm rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700"
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Tabel untuk md+ -->
+        <!-- Table (md+) -->
         <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5 hidden md:block">
           <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
@@ -238,7 +280,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <!-- Kartu list untuk < md -->
+        <!-- Cards (< md) -->
         <section class="rounded-2xl bg-zinc-900/70 border border-zinc-800 p-4 sm:p-5 md:hidden">
           <ul class="space-y-3">
             <li v-for="r in rows" :key="r.UID" class="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
@@ -264,7 +306,7 @@ onBeforeUnmount(() => {
       <div class="divide-y divide-zinc-800 rounded-2xl overflow-hidden">
         <header class="px-4 sm:px-5 py-3 flex items-center">
           <h3 class="font-semibold">Edit Peserta</h3>
-          <button @click="cancelEdit" class="ml-auto inline-flex items-center justify-center size-8 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white">✕</button>
+          <button @click="cancelEdit" class="ml-auto inline-flex items-center justify-center size-8 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white cursor-pointer">✕</button>
         </header>
 
         <div class="p-4 sm:p-5 space-y-5">
@@ -290,6 +332,7 @@ onBeforeUnmount(() => {
                   ref="fileInp"
                   type="file"
                   accept="image/*"
+                  @change="onFileChange"
                   class="cursor-pointer mt-1 w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-white hover:file:bg-zinc-600"
                 />
                 <p class="text-xs text-zinc-400 mt-1">Jika tidak dipilih, foto lama tetap dipakai.</p>
