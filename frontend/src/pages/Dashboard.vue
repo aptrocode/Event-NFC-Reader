@@ -1,29 +1,42 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import TheSidebar from '../components/TheSidebar.vue';
+import ButtonTable from '../components/atoms/ButtonTable.vue';
+
+type Participant = { UID: string; Nama?: string; Foto?: string };
 
 const q = ref('');
-const rows = ref<any[]>([]);
+const rows = ref<Participant[]>([]);
+
+const cols = [
+  { key: 'photo', label: 'Foto' },
+  { key: 'nama', label: 'Nama' },
+  { key: 'uid', label: 'UID' },
+  { key: 'waktu', label: 'Waktu' },
+  { key: 'aksi', label: 'Aksi' },
+];
 
 const dlg = ref<HTMLDialogElement | null>(null);
 const editUID = ref('');
 const editName = ref('');
 const fileInp = ref<HTMLInputElement | null>(null);
-
 const currentPhotoUrl = ref<string | null>(null);
 const preview = ref<string | null>(null);
+
+const delDlg = ref<HTMLDialogElement | null>(null);
+const delUid = ref<string | null>(null);
+const delName = ref<string | null>(null);
 
 const sidebarOpen = ref(false);
 const isDesktop = ref(false);
 const hasInteracted = ref(false);
+let disposeBreakpoint: (() => void) | null = null;
 
 function setupBreakpoint() {
   const mql = window.matchMedia('(min-width: 1024px)');
   const apply = () => {
     isDesktop.value = mql.matches;
-    if (!hasInteracted.value) {
-      sidebarOpen.value = mql.matches ? true : false;
-    }
+    if (!hasInteracted.value) sidebarOpen.value = mql.matches;
   };
   mql.addEventListener('change', apply);
   apply();
@@ -49,7 +62,7 @@ async function loadList() {
   if (j.ok) rows.value = j.data;
 }
 
-function openEdit(r: any) {
+function openEdit(r: Participant) {
   editUID.value = r.UID;
   editName.value = r.Nama || '';
   currentPhotoUrl.value = r.Foto ? '/' + r.Foto : null;
@@ -72,28 +85,11 @@ function readFileAsDataURL(file: File) {
   });
 }
 
-onMounted(() => {
-  const dispose = setupBreakpoint();
-  const inp = fileInp.value;
-  if (inp) {
-    const handler = async () => {
-      const f = inp.files?.[0];
-      if (!f) {
-        preview.value = null;
-        return;
-      }
-      preview.value = await readFileAsDataURL(f);
-    };
-    inp.addEventListener('change', handler);
-  }
-  loadList();
-  onBeforeUnmount(dispose);
-});
-
 async function saveEdit() {
   const payload: any = { name: editName.value };
   const f = fileInp.value?.files?.[0];
   if (f) payload.photoDataURL = await readFileAsDataURL(f);
+
   const res = await fetch(`/api/participant/${encodeURIComponent(editUID.value)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -108,21 +104,56 @@ async function saveEdit() {
   await loadList();
 }
 
-async function doDelete(uid: string) {
-  const ok = confirm('Hapus peserta ini? Foto terkait juga akan dihapus.');
-  if (!ok) return;
-  const res = await fetch(`/api/participant/${encodeURIComponent(uid)}?deletePhoto=1`, { method: 'DELETE' });
+function openDelete(r: Participant) {
+  delUid.value = r.UID;
+  delName.value = r.Nama || '(Tanpa Nama)';
+  delDlg.value?.showModal();
+}
+
+async function confirmDelete() {
+  if (!delUid.value) return;
+  const res = await fetch(`/api/participant/${encodeURIComponent(delUid.value)}?deletePhoto=1`, { method: 'DELETE' });
   const j = await res.json();
   if (!j.ok) {
     alert('Gagal menghapus: ' + (j.error || 'unknown'));
     return;
   }
+  delDlg.value?.close();
+  delUid.value = null;
+  delName.value = null;
   await loadList();
+}
+
+function cancelDelete() {
+  delDlg.value?.close();
+  delUid.value = null;
+  delName.value = null;
 }
 
 function cancelEdit() {
   dlg.value?.close();
 }
+
+onMounted(() => {
+  disposeBreakpoint = setupBreakpoint();
+  const inp = fileInp.value;
+  if (inp) {
+    const handler = async () => {
+      const f = inp.files?.[0];
+      if (!f) {
+        preview.value = null;
+        return;
+      }
+      preview.value = await readFileAsDataURL(f);
+    };
+    inp.addEventListener('change', handler);
+  }
+  loadList();
+});
+
+onBeforeUnmount(() => {
+  disposeBreakpoint?.();
+});
 </script>
 
 <template>
@@ -137,7 +168,11 @@ function cancelEdit() {
     <div :class="['min-h-screen flex-1 transition-[margin] duration-300', isDesktop && sidebarOpen ? 'ml-60' : 'ml-0']">
       <header class="sticky top-0 z-40 bg-zinc-900/70 backdrop-blur border-b border-zinc-800">
         <div class="px-3 sm:px-4 py-2.5 flex items-center gap-2">
-          <button aria-label="Toggle sidebar" @click="toggleSidebar" class="cursor-pointer inline-flex items-center justify-center size-9 rounded-lg border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800/70">
+          <button
+            aria-label="Toggle sidebar"
+            @click="toggleSidebar"
+            class="cursor-pointer inline-flex items-center justify-center size-9 rounded-lg border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800/70"
+          >
             <svg viewBox="0 0 24 24" class="size-5 stroke-current" fill="none" stroke-width="1.8">
               <path d="M4 7h16M4 12h16M4 17h16" />
             </svg>
@@ -171,27 +206,31 @@ function cancelEdit() {
             <table class="min-w-full text-sm">
               <thead class="text-left text-zinc-300 border-b border-zinc-800">
                 <tr>
-                  <th class="py-2 pr-4">Foto</th>
-                  <th class="py-2 pr-4">Nama</th>
-                  <th class="py-2 pr-4">UID</th>
-                  <th class="py-2 pr-4">Waktu</th>
-                  <th class="py-2 pr-4">Aksi</th>
+                  <th v-for="c in cols" :key="c.key" class="py-2 pr-4">{{ c.label }}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="r in rows" :key="r.UID" class="align-middle">
-                  <td class="py-3 pr-4">
-                    <img v-if="r.Foto" :src="'/' + r.Foto" class="size-12 rounded-xl object-cover" />
-                    <div v-else class="size-12 rounded-xl bg-zinc-800 grid place-items-center text-xs text-zinc-400">N/A</div>
-                  </td>
-                  <td class="py-3 pr-4 font-medium max-w-[280px] truncate">{{ r.Nama || '(Tanpa Nama)' }}</td>
-                  <td class="py-3 pr-4 text-zinc-300 whitespace-nowrap">{{ r.UID }}</td>
-                  <td class="py-3 pr-4 text-zinc-300 whitespace-nowrap">{{ tsDisplay(r.Foto) }}</td>
-                  <td class="py-3 pr-4">
-                    <div class="flex gap-2">
-                      <button @click="openEdit(r)" class="cursor-pointer px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Edit</button>
-                      <button @click="doDelete(r.UID)" class="cursor-pointer px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white">Delete</button>
-                    </div>
+                  <td v-for="c in cols" :key="c.key" class="py-3 pr-4">
+                    <template v-if="c.key === 'photo'">
+                      <img v-if="r.Foto" :src="'/' + r.Foto" class="size-12 rounded-xl object-cover" />
+                      <div v-else class="size-12 rounded-xl bg-zinc-800 grid place-items-center text-xs text-zinc-400">N/A</div>
+                    </template>
+                    <template v-else-if="c.key === 'nama'">
+                      <span class="font-medium max-w-[280px] inline-block truncate">{{ r.Nama || '(Tanpa Nama)' }}</span>
+                    </template>
+                    <template v-else-if="c.key === 'uid'">
+                      <span class="text-zinc-300 whitespace-nowrap">{{ r.UID }}</span>
+                    </template>
+                    <template v-else-if="c.key === 'waktu'">
+                      <span class="text-zinc-300 whitespace-nowrap">{{ tsDisplay(r.Foto) }}</span>
+                    </template>
+                    <template v-else-if="c.key === 'aksi'">
+                      <div class="flex gap-2">
+                        <ButtonTable icon="edit" variant="ghost" title="Edit" @click="openEdit(r)" />
+                        <ButtonTable icon="trash" variant="danger" title="Delete" @click="openDelete(r)" />
+                      </div>
+                    </template>
                   </td>
                 </tr>
               </tbody>
@@ -211,8 +250,8 @@ function cancelEdit() {
                 <div class="text-xs text-zinc-500">{{ tsDisplay(r.Foto) }}</div>
               </div>
               <div class="flex gap-2 shrink-0">
-                <button @click="openEdit(r)" class="px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-xs">Edit</button>
-                <button @click="doDelete(r.UID)" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs">Del</button>
+                <ButtonTable icon="edit" size="sm" variant="ghost" title="Edit" @click="openEdit(r)" />
+                <ButtonTable icon="trash" size="sm" variant="danger" title="Delete" @click="openDelete(r)" />
               </div>
             </li>
           </ul>
@@ -220,6 +259,7 @@ function cancelEdit() {
       </main>
     </div>
 
+    <!-- Edit Modal -->
     <dialog ref="dlg" class="modal fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(640px,95vw)] rounded-2xl bg-zinc-900 text-zinc-100 border border-zinc-700 shadow-2xl p-0">
       <div class="divide-y divide-zinc-800 rounded-2xl overflow-hidden">
         <header class="px-4 sm:px-5 py-3 flex items-center">
@@ -240,38 +280,48 @@ function cancelEdit() {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div class="space-y-4">
               <div class="text-sm mb-2">Foto saat ini</div>
-              <img v-if="currentPhotoUrl" :src="currentPhotoUrl" class="w-full max-w-[220px] aspect-square object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
-              <div v-else class="w-[220px] h-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Tidak ada</div>
+              <img v-if="currentPhotoUrl" :src="currentPhotoUrl" class="size-[220px] object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
+              <div v-else class="size-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Tidak ada</div>
+              <div>
+                <label class="text-sm">Ganti Foto (opsional)</label>
+                <input
+                  ref="fileInp"
+                  type="file"
+                  accept="image/*"
+                  class="cursor-pointer mt-1 w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-white hover:file:bg-zinc-600"
+                />
+                <p class="text-xs text-zinc-400 mt-1">Jika tidak dipilih, foto lama tetap dipakai.</p>
+              </div>
             </div>
-            <div>
+            <div class="space-y-4">
               <div class="text-sm mb-2">Preview foto baru</div>
-              <img v-if="preview" :src="preview" class="w-full max-w-[220px] aspect-square object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
-              <div v-else class="w-[220px] h-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Belum dipilih</div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-            <div class="sm:col-span-2">
-              <label class="text-sm">Ganti Foto (opsional)</label>
-              <input
-                ref="fileInp"
-                type="file"
-                accept="image/*"
-                class="mt-1 w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-zinc-700 file:text-white hover:file:bg-zinc-600"
-              />
-              <p class="text-xs text-zinc-400 mt-1">Jika tidak dipilih, foto lama tetap dipakai.</p>
-            </div>
-            <div class="flex items-center gap-3">
-              <button @click.prevent="clearPreview" class="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs hover:bg-zinc-700">Bersihkan</button>
+              <img v-if="preview" :src="preview" class="size-[220px] object-cover rounded-xl border border-zinc-700 bg-zinc-800" />
+              <div v-else class="size-[220px] rounded-xl border border-dashed border-zinc-700 grid place-items-center text-xs text-zinc-400">Belum dipilih</div>
+              <button @click.prevent="clearPreview" class="cursor-pointer px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs hover:bg-zinc-700">Bersihkan</button>
             </div>
           </div>
         </div>
 
         <footer class="px-4 sm:px-5 py-3 flex justify-end gap-2">
-          <button @click="cancelEdit" class="px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Batal</button>
-          <button @click="saveEdit" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">Simpan</button>
+          <button @click="cancelEdit" class="cursor-pointer px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Batal</button>
+          <button @click="saveEdit" class="cursor-pointer px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">Simpan</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <!-- Delete Modal -->
+    <dialog ref="delDlg" class="modal fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(420px,92vw)] rounded-2xl bg-zinc-900 text-zinc-100 border border-zinc-700 shadow-2xl p-0">
+      <div class="divide-y divide-zinc-800 rounded-2xl overflow-hidden">
+        <header class="px-4 py-3 font-semibold">Konfirmasi</header>
+        <div class="px-4 py-4 text-sm">
+          <p>Hapus peserta ini? Foto terkait juga akan dihapus.</p>
+          <p v-if="delName" class="mt-2 text-zinc-400"><span class="text-zinc-300">Target:</span> {{ delName }} ({{ delUid }})</p>
+        </div>
+        <footer class="px-4 py-3 flex justify-end gap-2">
+          <button @click="cancelDelete" class="cursor-pointer px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 hover:bg-zinc-700">Batal</button>
+          <button @click="confirmDelete" class="cursor-pointer px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white">Hapus</button>
         </footer>
       </div>
     </dialog>
